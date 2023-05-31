@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#000000" />
+    <link rel="shortcut icon" type="image/ico" href="/src/assets/favicon.ico" />
+    <title>Solid App</title>
+    <link rel="stylesheet" href="./app/lib/fontawesome-free-5.11.2-web/css/all.min.css" type="text/css">
+    <link rel="stylesheet" href="./dist/xeokit-bim-viewer.css" type="text/css">
+    <link rel="stylesheet" href="./app/css/style.css">
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+
+    <script src="./app/lib/popper.js"></script>
+    <script src="./app/lib/tippy.js"></script>
+
+    <script type="module">
+      
+      import {Server, BIMViewer, LocaleService} from "./dist/xeokit-bim-viewer.es.js";
+
+      import {messages as localeMessages} from "./dist/messages.js";
+  
+      window.onload = function () {
+  
+          const requestParams = getRequestParams();
+          const locale = requestParams.locale || "en";
+          const projectId = requestParams.projectId;
+  
+          if (!projectId) {
+              return;
+          }
+  
+          const openExplorer = requestParams.openExplorer;
+          setExplorerOpen(openExplorer === "true");
+  
+          const enableEditModels = (requestParams.enableEditModels === "true");
+  
+          const server = new Server({
+              dataDir: "./data"
+          });
+  
+          const bimViewer = new BIMViewer(server, {
+              localeService: new LocaleService({
+                  messages: localeMessages,
+                  locale: locale
+              }),
+              canvasElement: document.getElementById("myCanvas"), // WebGL canvas
+              keyboardEventsElement: document, // Optional, defaults to document
+              explorerElement: document.getElementById("myExplorer"), // Left panel
+              toolbarElement: document.getElementById("myToolbar"), // Toolbar
+              inspectorElement: document.getElementById("myInspector"), // Right panel
+              navCubeCanvasElement: document.getElementById("myNavCubeCanvas"),
+              busyModelBackdropElement: document.getElementById("myViewer"),
+              enableEditModels: enableEditModels
+          });
+  
+          bimViewer.localeService.on("updated", () => {
+              const localizedElements = document.querySelectorAll('.xeokit-i18n');
+              localizedElements.forEach((localizedElement) => {
+                  if (localizedElement.dataset.xeokitI18n) {
+                      localizedElement.innerText = bimViewer.localeService.translate(localizedElement.dataset.xeokitI18n);
+                  }
+                  if (localizedElement.dataset.xeokitI18ntip) {
+                      const translation = bimViewer.localeService.translate(localizedElement.dataset.xeokitI18ntip);
+                      if (translation) {
+                          localizedElement.dataset.tippyContent = bimViewer.localeService.translate(localizedElement.dataset.xeokitI18ntip);
+                      }
+                  }
+                  if (localizedElement.dataset.tippyContent) {
+                      if (localizedElement._tippy) {
+                          localizedElement._tippy.setContent(localizedElement.dataset.tippyContent);
+                      } else {
+                          tippy(localizedElement, {
+                              appendTo: "parent",
+                              zIndex: 1000000,
+                              allowHTML: true
+                          });
+                      }
+                  }
+              });
+          });
+  
+          bimViewer.setConfigs({
+              "selectedGlowThrough": true,
+              "highlightGlowThrough": true
+          });
+  
+          bimViewer.on("openExplorer", () => {
+              setExplorerOpen(true);
+          });
+  
+          bimViewer.on("openInspector", () => {
+              setInspectorOpen(true);
+          });
+  
+          bimViewer.on("addModel", (event) => { // "Add" selected in Models tab's context menu
+              console.log("addModel: " + JSON.stringify(event, null, "\t"));
+          });
+  
+          bimViewer.on("editModel", (event) => { // "Edit" selected in Models tab's context menu
+              console.log("editModel: " + JSON.stringify(event, null, "\t"));
+          });
+  
+          bimViewer.on("deleteModel", (event) => { // "Delete" selected in Models tab's context menu
+              console.log("deleteModel: " + JSON.stringify(event, null, "\t"));
+          });
+  
+          const viewerConfigs = requestParams.configs;
+          if (viewerConfigs) {
+              const configNameVals = viewerConfigs.split(",");
+              for (let i = 0, len = configNameVals.length; i < len; i++) {
+                  const configNameValStr = configNameVals[i];
+                  const configNameVal = configNameValStr.split(":");
+                  const configName = configNameVal[0];
+                  const configVal = configNameVal[1];
+                  bimViewer.setConfig(configName, configVal);
+              }
+          }
+          
+          bimViewer.loadProject(projectId, () => {
+                  const modelId = requestParams.modelId;
+                  if (modelId) {
+                      bimViewer.loadModel(modelId);
+                  }
+                  const tab = requestParams.tab;
+                  if (tab) {
+                      bimViewer.openTab(tab);
+                  }
+                  watchHashParams();
+              },
+              (errorMsg) => {
+                  console.error(errorMsg);
+              });
+          
+          function watchHashParams() {
+              let lastHash = "";
+              window.setInterval(() => {
+                  const currentHash = window.location.hash;
+                  if (currentHash !== lastHash) {
+                      parseHashParams();
+                      lastHash = currentHash;
+                  }
+              }, 400);
+          }
+          
+          function parseHashParams() {
+              const params = getHashParams();
+              const actionsStr = params.actions;
+              if (!actionsStr) {
+                  return;
+              }
+              const actions = actionsStr.split(",");
+              if (actions.length === 0) {
+                  return;
+              }
+              for (let i = 0, len = actions.length; i < len; i++) {
+                  const action = actions[i];
+                  switch (action) {
+                      case "focusObject":
+                          const objectId = params.objectId;
+                          if (!objectId) {
+                              console.error("Param expected for `focusObject` action: 'objectId'");
+                              break;
+                          }
+                          bimViewer.setAllObjectsSelected(false);
+                          bimViewer.setObjectsSelected([objectId], true);
+                          bimViewer.flyToObject(objectId, () => {
+                              // FIXME: Showing objects in tabs involves scrolling the HTML within the tabs - disable until we know how to scroll the correct DOM element. Otherwise, that function works OK
+  
+                              // bimViewer.showObjectInObjectsTab(objectId);
+                              // bimViewer.showObjectInClassesTab(objectId);
+                              // bimViewer.showObjectInStoreysTab(objectId);
+                          });
+                          break;
+                      case "focusObjects":
+                          const objectIds = params.objectIds;
+                          if (!objectIds) {
+                              console.error("Param expected for `focusObjects` action: 'objectIds'");
+                              break;
+                          }
+                          const objectIdArray = objectIds.split(",");
+                          bimViewer.setAllObjectsSelected(false);
+                          bimViewer.setObjectsSelected(objectIdArray, true);
+                          bimViewer.viewFitObjects(objectIdArray, () => {
+                          });
+                          break;
+                      case "clearFocusObjects":
+                          bimViewer.setAllObjectsSelected(false);
+                          bimViewer.viewFitAll();
+                          // TODO: view fit nothing?
+                          break;
+                      case "openTab":
+                          const tabId = params.tabId;
+                          if (!tabId) {
+                              console.error("Param expected for `openTab` action: 'tabId'");
+                              break;
+                          }
+                          bimViewer.openTab(tabId);
+                          break;
+                      default:
+                          console.error("Action not supported: '" + action + "'");
+                          break;
+                  }
+              }
+          }
+  
+          function setExplorerOpen(explorerOpen) {
+              const toggle = document.getElementById("explorer_toggle");
+              if (toggle) {
+                  toggle.checked = explorerOpen;
+              }
+          }
+  
+          function setInspectorOpen(inspectorOpen) {
+              const toggle = document.getElementById("inspector_toggle");
+              if (toggle) {
+                  toggle.checked = inspectorOpen;
+              }
+          }
+  
+          function getRequestParams() {
+              const vars = {};
+              window.location.href.replace(/[?&]+([^=&]+)=([^&]*)/gi, (m, key, value) => {
+                  vars[key] = value;
+              });
+              return vars;
+          }
+  
+          function getHashParams() {
+              const hashParams = {};
+              let e;
+              const a = /\+/g;  // Regex for replacing addition symbol with a space
+              const r = /([^&;=]+)=?([^&;]*)/g;
+              const d = function (s) {
+                  return decodeURIComponent(s.replace(a, " "));
+              };
+              const q = window.location.hash.substring(1);
+              while (e = r.exec(q)) {
+                  hashParams[d(e[1])] = d(e[2]);
+              }
+              return hashParams;
+          }
+  
+          window.bimViewer = bimViewer;
+      }
+  
+  </script>
+    <script src="/src/index.jsx" type="module"></script>
+  </body>
+</html>
+
+<!-- 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+
+    <style>
+
+        html, body {
+            height: 100%;
+            background: #f2f2f2;
+        }
+
+        body {
+            font-family: 'Roboto', sans-serif;
+            font-size: 14px;
+            line-height: 1.50;
+            -webkit-font-smoothing: antialiased;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        .column {
+            float: left;
+            width: 100%;
+        }
+
+        .row:after {
+            content: "";
+            display: table;
+            clear: both;
+        }
+
+        iframe {
+            width: 100%;
+            height: 800px;
+        }
+
+    </style>
+
+</head>
+<body onload="init()">
+
+<script>
+
+    function init() {
+
+        const iframeBaseURL = "./../app/index.html?projectId=Systhema&modelId=170133_Asvest_20200131";
+
+        const iframeElement = document.getElementById("embeddedViewer");
+        if (!iframeElement) {
+            throw "IFRAME not found";
+        }
+
+        iframeElement.src = iframeBaseURL;
+
+        const objectIdsUsed = {};
+
+        window.selectObject = function (checkbox) {
+
+            const objectId = checkbox.name;
+
+            if (checkbox.checked) {
+                objectIdsUsed[objectId] = true;
+            } else {
+                delete objectIdsUsed[objectId];
+            }
+
+            const objectIds = Object.keys(objectIdsUsed);
+
+            if (objectIds.length === 0) {
+                iframeElement.src = iframeBaseURL + "#actions=clearFocusObjects";
+            } else {
+                const objectIdsParam = objectIds.join(",");
+                iframeElement.src = iframeBaseURL + "#actions=focusObjects,openTab&objectIds=" + objectIdsParam + "&tabId=objects";
+            }
+        }
+
+    }
+
+</script>
+
+<ul>
+    <li><input type="checkbox" name="0FazZzVxL0ZAC2Xz9Lc_VS" onclick="javascript:selectObject(this)">Focus object
+        "0FazZzVxL0ZAC2Xz9Lc_VS"</input></li>
+    <li><input type="checkbox" name="12NjfiY$5BWxO3cGvRvhMM" onclick="javascript:selectObject(this)">Focus object
+        "12NjfiY$5BWxO3cGvRvhMM"</input></li>
+</ul>
+<iframe id="embeddedViewer"></iframe>
+
+</body>
+</html> -->
